@@ -1,5 +1,8 @@
 #!/usr/bin/php
 <?php
+define('UC_PUBLIC_KEY', '169bf4c6eccf97126d89');
+define('UC_SECRET_KEY', '853b1e006d74650b27a7');
+
 require __DIR__ . '/vendor/autoload.php';
 require __DIR__ . '/cli.php';
 require __DIR__ . '/../edetalj/webshop/util/Constants.php';
@@ -12,11 +15,22 @@ use webshop\Product;
 use webshop\Category;
 use webshop\Attribute;
 use webshop\AttributeValue;
+use webshop\cms\ProductImage;
 
 use Doctrine\MongoDB\Connection;
 use Doctrine\ODM\MongoDB\Configuration;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use Doctrine\ODM\MongoDB\Mapping\Driver\YamlDriver;
+
+use Uploadcare;
+
+/*
+ * Version 1.0 -> 2.0 Database Migration tool
+ * Johan Henriksson, Nov 2014
+ *
+ * TODO:
+ *  - Add pages for products & categories with their metadata information
+ */
 
 putline("**********************\n");
 putline("Edetalj migration tool\n");
@@ -55,6 +69,10 @@ $dm = DocumentManager::create(new Connection(), $config);
 
 $prod_repo = $dm->getDocumentCollection('\webshop\Product');
 $cat_repo  = $dm->getDocumentCollection('\webshop\Category');
+
+/* Uploadcare API */
+
+$uc_api = new Uploadcare\Api(UC_PUBLIC_KEY, UC_SECRET_KEY);
 
 /* All done. */
 
@@ -194,11 +212,16 @@ foreach($products as $product)
         {
             $new_path = $img_path . $name;
 
+            $img = uploadImage($old_path);
+            $prod->addImage($img);
+
             /* Delete existing file */
+            /*
             if (file_exists($new_path))
                 unlink($new_path);
 
             copy($old_path, $new_path);
+             */
             $i++;
         }
     }
@@ -215,6 +238,17 @@ putline("All done.\n");
 /******************************************************
     Functions
  ******************************************************/
+
+function uploadImage($path) 
+{
+    global $uc_api;
+
+    $file = $uc_api->uploader->fromPath($path);
+    $file->store();
+
+    $image = new ProductImage($file->getFileId());
+    return $image;
+}
 
 function getProductAttributes($product_id)
 {
