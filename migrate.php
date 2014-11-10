@@ -3,6 +3,8 @@
 require __DIR__ . '/vendor/autoload.php';
 require __DIR__ . '/cli.php';
 require __DIR__ . '/../edetalj/webshop/util/Constants.php';
+require __DIR__ . '/../edetalj/webshop/util/Functions.php';
+require __DIR__ . '/../edetalj/webshop/util/Exceptions.php';
 
 /* V2 Data structures */
 use webshop\Money;
@@ -16,7 +18,11 @@ use Doctrine\ODM\MongoDB\Configuration;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use Doctrine\ODM\MongoDB\Mapping\Driver\YamlDriver;
 
-putline("Edetalj Migration tool\n");
+putline("**********************\n");
+putline("Edetalj migration tool\n");
+putline("**********************\n");
+putline("\n");
+
 putline("Dump file name: ");
 
 $file = getline();
@@ -26,15 +32,15 @@ if ($end != '.php')
 
 chmod(__DIR__ . '/images', 0777);
 
-putline("Loading from: $file\n");
+putline("Loading from: $file.. ");
 
 require $file;
 
-putline("Ok.\n");
+putline("OK.\n");
 
 /* Connect to MongoDB */
 
-putline("Target database (will be cleared): ");
+putline("Target database: "); 
 $dbname = getline();
 
 $config = new Configuration();
@@ -52,14 +58,17 @@ $cat_repo  = $dm->getDocumentCollection('\webshop\Category');
 
 /* All done. */
 
-putline("Ready. Press enter to migrate.");
+putline("\n");
+putline("Ready. Press enter to migrate.\n");
+putline("NOTICE: All categories and products in '$dbname' will be deleted.\n");
 getline();
 
 /* Clear database */
 
 $prod_repo->remove(array());
 $cat_repo->remove(array());
-putline("Database cleared");
+$dm->flush();
+putline("Target collections cleared.\n");
 
 /* Create categories */
 $catmap = array();
@@ -67,7 +76,6 @@ $catmap = array();
 putline("Creating categories... ");
 foreach($categories as $category) 
 {
-    putline($category['name'] . " ");
     $cat = new Category();
     $cat->setName($category['name']);
     $cat->setUrl($category['urlstring']);
@@ -76,9 +84,11 @@ foreach($categories as $category)
     /* Save category to mongodb */
     $dm->persist($cat);
 
-    putline($category['name'] . " ");
+    putline($category['name'] . ", ");
 }
 putline("\n\n");
+
+$dm->flush();
 
 /* Setup category hieararchy */
 
@@ -89,15 +99,20 @@ foreach($categories as $old_cat)
     if ($parent_id != 0) {
         $cat = $map_categories[$old_cat['id']];
         $parent = $map_categories[$parent_id];
-        $cat->setParent($parent);
+        $cat->setParent($parent->getID());
         $cat->parent_ref = $parent;
+
+        $dm->persist($cat);
     }
 }
 putline("OK.\n");
 
+$dm->flush();
+
 /* Create products */
 $map_products = array();
 
+$i = 0;
 putline("Creating products... ");
 foreach($products as $product) 
 {
@@ -106,6 +121,8 @@ foreach($products as $product)
     $prod->setTitle($product['title']);
     $prod->setDescription($product['description']);
     $prod->setReference($product['reference']);
+    $prod->setUrl($product['urlstring']);
+    $prod->setWeight($product['weight']);
     $prod->setPrice(new Money(100 * intval($product['price'])));
     $map_products[$product['id']] = $prod;
 
@@ -114,9 +131,11 @@ foreach($products as $product)
     /* Save to mongodb */
     $dm->persist($prod);
 
-    putline($product['title'] . " ");
+    putline($product['title'] . ", ");
+    $i++;
 }
-putline("\n\n");
+putline("\n");
+putline("Done. $i products created\n");
 
 putline("Adding products to categories... ");
 foreach($products as $product) 
@@ -135,6 +154,10 @@ putline("OK.\n");
 $i = 0;
 foreach($products as $product) 
 {
+    /* Skip out-of-category products */
+    if ($product['category'] == 0)
+        continue;
+
     $prod = $map_products[$product['id']];
     $images = getProductImages($product['id']);
 
@@ -162,11 +185,12 @@ foreach($products as $product)
 
         if (file_exists($old_path)) 
         {
+            $new_path = $img_path . $name;
+
             /* Delete existing file */
             if (file_exists($new_path))
                 unlink($new_path);
 
-            $new_path = $img_path . $name;
             copy($old_path, $new_path);
             $i++;
         }
