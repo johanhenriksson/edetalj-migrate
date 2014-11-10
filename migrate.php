@@ -32,7 +32,7 @@ if ($end != '.php')
 
 chmod(__DIR__ . '/images', 0777);
 
-putline("Loading from: $file.. ");
+putline("Loading from: $file... ");
 
 require $file;
 
@@ -116,8 +116,12 @@ $i = 0;
 putline("Creating products... ");
 foreach($products as $product) 
 {
-    $prod = new Product();
+    /* Validation */
+    if ($product['category'] == 0)
+        continue;
 
+    /* Create product */
+    $prod = new Product();
     $prod->setTitle($product['title']);
     $prod->setDescription($product['description']);
     $prod->setReference($product['reference']);
@@ -126,7 +130,10 @@ foreach($products as $product)
     $prod->setPrice(new Money(100 * intval($product['price'])));
     $map_products[$product['id']] = $prod;
 
-    /* Get attributes */
+    /* Add attributes */
+    $attrs = getProductAttributes($product['id']);
+    foreach($attrs as $attr)
+        $prod->addAttribute($attr);
 
     /* Save to mongodb */
     $dm->persist($prod);
@@ -209,6 +216,25 @@ putline("All done.\n");
     Functions
  ******************************************************/
 
+function getProductAttributes($product_id)
+{
+    global $product_attr;
+
+    $attr_ids = array();
+    foreach($product_attr as $pa) {
+        if ($pa['product'] == $product_id)
+            $attr_ids[] = $pa['attribute'];
+    }
+
+    $attributes = array();
+    foreach($attr_ids as $attr_id)
+        $attributes[] = getAttribute($attr_id);
+
+    if (count($attributes) > 0)
+        var_dump($attributes);
+    return $attributes;
+}
+
 function findAttribute($id) 
 {
     global $attribute_names;
@@ -228,7 +254,7 @@ function getAttribute($id)
     $attribute = new Attribute();
     $attribute->setName($attr['name']);
 
-    $values = findAttributeValues($id);
+    $values = getAttributeValues($id);
     foreach($values as $value) {
         $attribute->addValue($value);
     }
@@ -246,9 +272,13 @@ function getAttributeValues($attr_id)
         if ($attr_val['type'] != $attr_id) 
             continue;
 
+        /* Skip empty options */
+        if (empty(trim($attr_val['value'])))
+            continue;
+
         $obj = new AttributeValue();
-        $obj->setValue($value['value']);
-        $obj->setPrice(new Money(100 * intval($value['price'])));
+        $obj->setValue($attr_val['value']);
+        $obj->setPrice(new Money(100 * intval($attr_val['price'])));
         $vals[] = $obj;
     }
 
