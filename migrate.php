@@ -10,12 +10,14 @@ require __DIR__ . '/../edetalj/webshop/util/Functions.php';
 require __DIR__ . '/../edetalj/webshop/util/Exceptions.php';
 
 /* V2 Data structures */
+use webshop\Page;
 use webshop\Money;
 use webshop\Product;
 use webshop\Category;
 use webshop\Attribute;
 use webshop\AttributeValue;
 use webshop\cms\ProductImage;
+use webshop\views\ProductView;
 
 use Doctrine\MongoDB\Connection;
 use Doctrine\ODM\MongoDB\Configuration;
@@ -67,6 +69,7 @@ $config->setDefaultDB($dbname);
 
 $dm = DocumentManager::create(new Connection(), $config);
 
+$page_repo = $dm->getDocumentCollection('\webshop\Page');
 $prod_repo = $dm->getDocumentCollection('\webshop\Product');
 $cat_repo  = $dm->getDocumentCollection('\webshop\Category');
 
@@ -83,6 +86,7 @@ getline();
 
 /* Clear database */
 
+$page_repo->remove(array());
 $prod_repo->remove(array());
 $cat_repo->remove(array());
 $dm->flush();
@@ -101,6 +105,8 @@ foreach($categories as $category)
 
     /* Save category to mongodb */
     $dm->persist($cat);
+
+
 
     putline($category['name'] . ", ");
 }
@@ -156,6 +162,17 @@ foreach($products as $product)
     /* Save to mongodb */
     $dm->persist($prod);
 
+    /* Create cms page */
+    $page = new Page('/product/' . $prod->getUrl());
+    $page->setTitle($product['pagetitle']);
+    $page->setDescription($product['pagedesc']);
+    $page->setView('webshop\\views\\ProductView');
+    $page->setTemplate(ProductView::TEMPLATE);
+    $page->setEntryPoint(ProductView::ENTRY);
+
+    /* Save page to mongodb */
+    $dm->persist($page);
+
     putline($product['title'] . ", ");
     $i++;
 }
@@ -175,6 +192,7 @@ foreach($products as $product)
 }
 putline("OK.\n");
 
+putline("Uploading product images...\n");
 /* Sort images */
 $i = 0;
 foreach($products as $product) 
@@ -215,19 +233,13 @@ foreach($products as $product)
             $img = uploadImage($old_path);
             $prod->addImage($img);
 
-            /* Delete existing file */
-            /*
-            if (file_exists($new_path))
-                unlink($new_path);
-
-            copy($old_path, $new_path);
-             */
+            putline("$name --> " . $img->getUUID() . "\n");
             $i++;
         }
     }
 }
 
-putline("Sorted $i product images\n");
+putline("Uploaded $i product images\n");
 
 /* Flushing changes to mongodb */
 $dm->flush();
@@ -263,9 +275,6 @@ function getProductAttributes($product_id)
     $attributes = array();
     foreach($attr_ids as $attr_id)
         $attributes[] = getAttribute($attr_id);
-
-    if (count($attributes) > 0)
-        var_dump($attributes);
     return $attributes;
 }
 
