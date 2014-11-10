@@ -1,0 +1,12 @@
+{
+    "require": {
+        "doctrine/mongodb": "~1.1",
+        "doctrine/mongodb-odm": "1.0.0BETA10",
+        "symfony/yaml": "*"
+    },
+    "autoload": {
+	   "psr-0": {
+            "webshop": "../edetalj"
+       }
+    }
+}
