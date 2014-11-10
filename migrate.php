@@ -24,6 +24,8 @@ $end = substr($file, -4);
 if ($end != '.php')
     $file .= '.php';
 
+chmod(__DIR__ . '/images', 0777);
+
 putline("Loading from: $file\n");
 
 require $file;
@@ -36,70 +38,152 @@ putline("Target database (will be cleared): ");
 $dbname = getline();
 
 $config = new Configuration();
-$config->setProxyDir(__DIR__ . '/../edetalj/cache/proxies');
 $config->setProxyNamespace('Proxies');
-$config->setHydratorDir(__DIR__ . '/../edetalj/cache/hydrators');
 $config->setHydratorNamespace('Hydrators');
+$config->setProxyDir(__DIR__ . '/../edetalj/cache/proxies');
+$config->setHydratorDir(__DIR__ . '/../edetalj/cache/hydrators');
 $config->setMetadataDriverImpl(new YamlDriver(__DIR__ . '/../edetalj/metadata'));
 $config->setDefaultDB($dbname);
 
 $dm = DocumentManager::create(new Connection(), $config);
+
+$prod_repo = $dm->getDocumentCollection('\webshop\Product');
+$cat_repo  = $dm->getDocumentCollection('\webshop\Category');
 
 /* All done. */
 
 putline("Ready. Press enter to migrate.");
 getline();
 
+/* Clear database */
+
+$prod_repo->remove(array());
+$cat_repo->remove(array());
+putline("Database cleared");
+
 /* Create categories */
 $catmap = array();
 
 putline("Creating categories... ");
-foreach($categories as $category) {
-    putline($category['name'] . "\n");
+foreach($categories as $category) 
+{
+    putline($category['name'] . " ");
     $cat = new Category();
     $cat->setName($category['name']);
     $cat->setUrl($category['urlstring']);
-    $catmap[$category['id']] = $cat;
+    $map_categories[$category['id']] = $cat;
 
     /* Save category to mongodb */
     $dm->persist($cat);
 
     putline($category['name'] . " ");
 }
-putline("\n");
+putline("\n\n");
 
 /* Setup category hieararchy */
 
 putline("Setting up category relations... ");
-foreach($categories as $old_cat) {
+foreach($categories as $old_cat) 
+{
     $parent_id = $old_cat['parent'];
     if ($parent_id != 0) {
-        $cat = $catmap[$old_cat['id']];
-        $parent = $catmap[$parent_id];
+        $cat = $map_categories[$old_cat['id']];
+        $parent = $map_categories[$parent_id];
         $cat->setParent($parent);
-
-        /* Save changes */
+        $cat->parent_ref = $parent;
     }
 }
-putline("Ok.\n");
+putline("OK.\n");
 
 /* Create products */
+$map_products = array();
 
 putline("Creating products... ");
-foreach($products as $product) {
+foreach($products as $product) 
+{
     $prod = new Product();
 
     $prod->setTitle($product['title']);
     $prod->setDescription($product['description']);
     $prod->setReference($product['reference']);
     $prod->setPrice(new Money(100 * intval($product['price'])));
+    $map_products[$product['id']] = $prod;
+
+    /* Get attributes */
 
     /* Save to mongodb */
     $dm->persist($prod);
 
     putline($product['title'] . " ");
 }
+putline("\n\n");
+
+putline("Adding products to categories... ");
+foreach($products as $product) 
+{
+    if ($product['category'] == 0)
+        continue;
+
+    $prod = $map_products[$product['id']];
+    $category = $map_categories[$product['category']];
+    if ($category != null)
+        $category->addProduct($prod);
+}
+putline("OK.\n");
+
+/* Sort images */
+$i = 0;
+foreach($products as $product) 
+{
+    $prod = $map_products[$product['id']];
+    $images = getProductImages($product['id']);
+
+    /* Category path */
+    $cat_path = "/";
+    $cat = $map_categories[$product['category']];
+    while($cat != null) {
+        $cat_path = "/" . $cat->getName() . $cat_path;;
+        if (isset($cat->parent_ref))
+            $cat = $cat->parent_ref;
+        else
+            $cat = null;
+    }
+
+    /* Product Name */
+    $img_path = __DIR__ . '/images/' . $dbname . $cat_path . $prod->getTitle() . '/';
+    if (!file_exists($img_path))
+        mkdir($img_path, 0777, true); 
+
+    /* Copy images */
+    foreach($images as $image) {
+        $name = pathinfo($image)['basename'];
+
+        $old_path = __DIR__ . '/images/' . $image;
+
+        if (file_exists($old_path)) 
+        {
+            /* Delete existing file */
+            if (file_exists($new_path))
+                unlink($new_path);
+
+            $new_path = $img_path . $name;
+            copy($old_path, $new_path);
+            $i++;
+        }
+    }
+}
+
+putline("Sorted $i product images\n");
+
+/* Flushing changes to mongodb */
+$dm->flush();
+
 putline("\n");
+putline("All done.\n");
+
+/******************************************************
+    Functions
+ ******************************************************/
 
 function findAttribute($id) 
 {
@@ -147,11 +231,16 @@ function getAttributeValues($attr_id)
     return $vals;
 }
 
-/* Add attributes */
+function getProductImages($id)
+{
+    global $product_images;
 
-/* Sort images */
+    $images = array();
+    foreach($product_images as $image) {
+        if ($image['product'] != $id)
+            continue;
+        $images[] = $image['url'];
+    }
 
-/* Add products to categories */
-
-/* Flushing changes to mongodb */
-$dm->flush();
+    return $images;
+}
