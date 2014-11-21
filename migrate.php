@@ -147,6 +147,7 @@ foreach($products as $product)
     /* Create product */
     $prod = new Product();
     $prod->setTitle($product['title']);
+    $prod->setActive($product['active'] == true);
     $prod->setDescription($product['description']);
     $prod->setReference($product['reference']);
     $prod->setUrl($product['urlstring']);
