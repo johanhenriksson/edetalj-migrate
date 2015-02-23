@@ -1,7 +1,13 @@
 #!/usr/bin/php
 <?php
+/* edetalj standard 
 define('UC_PUBLIC_KEY', '169bf4c6eccf97126d89');
 define('UC_SECRET_KEY', '853b1e006d74650b27a7');
+ */
+/* jsenergi */
+define('UC_PUBLIC_KEY', 'ef025c9716b466c5e63f');
+define('UC_SECRET_KEY', '5e50c4d4af5d8b421c05');
+
 
 require __DIR__ . '/vendor/autoload.php';
 require __DIR__ . '/cli.php';
@@ -39,18 +45,9 @@ putline("Edetalj migration tool\n");
 putline("**********************\n");
 putline("\n");
 
-putline("Dump file name: ");
-
-$file = getline();
-$end = substr($file, -4);
-if ($end != '.php')
-    $file .= '.php';
-
 chmod(__DIR__ . '/images', 0777);
 
-putline("Loading from: $file... ");
-
-require $file;
+require 'import.php';
 
 putline("OK.\n");
 
@@ -76,6 +73,12 @@ $cat_repo  = $dm->getDocumentCollection('\webshop\Category');
 /* Uploadcare API */
 
 $uc_api = new Uploadcare\Api(UC_PUBLIC_KEY, UC_SECRET_KEY);
+$upload_images = false;
+
+putline("Upload images to uploadcare? (y/N) ");
+$upl_input = getline();
+if ($upl_input == "y" || $upl_input == "Y") 
+    $upload_images = true;
 
 /* All done. */
 
@@ -93,26 +96,24 @@ $dm->flush();
 putline("Target collections cleared.\n");
 
 /* Create categories */
-$catmap = array();
+$map_categories = array();
 
 putline("Creating categories... ");
 foreach($categories as $category) 
 {
     $cat = new Category();
     $cat->setName($category['name']);
-    $cat->setUrl($category['urlstring']);
+    $cat->setUrl(url_string($category['id']));
     $map_categories[$category['id']] = $cat;
 
     /* Save category to mongodb */
     $dm->persist($cat);
 
-
-
-    putline($category['name'] . ", ");
 }
-putline("\n\n");
+putline("OK\n");
 
 $dm->flush();
+$dm->clear();
 
 /* Setup category hieararchy */
 
@@ -120,7 +121,7 @@ putline("Setting up category relations... ");
 foreach($categories as $old_cat) 
 {
     $parent_id = $old_cat['parent'];
-    if ($parent_id != 0) {
+    if (!empty($parent_id)) {
         $cat = $map_categories[$old_cat['id']];
         $parent = $map_categories[$parent_id];
         $cat->setParent($parent->getID());
@@ -132,6 +133,7 @@ foreach($categories as $old_cat)
 putline("OK.\n");
 
 $dm->flush();
+$dm->clear();
 
 /* Create products */
 $map_products = array();
@@ -141,32 +143,24 @@ putline("Creating products... ");
 foreach($products as $product) 
 {
     /* Validation */
-    if ($product['category'] == 0)
-        continue;
 
     /* Create product */
     $prod = new Product();
     $prod->setTitle($product['title']);
-    $prod->setActive($product['active'] == true);
+    $prod->setActive(true);
     $prod->setDescription($product['description']);
     $prod->setReference($product['reference']);
-    $prod->setUrl($product['urlstring']);
-    $prod->setWeight($product['weight']);
+    $prod->setUrl(url_string($product['category'] . '-' . $product['title']));
     $prod->setPrice(new Money(100 * intval($product['price'])));
     $map_products[$product['id']] = $prod;
-
-    /* Add attributes */
-    $attrs = getProductAttributes($product['id']);
-    foreach($attrs as $attr)
-        $prod->addAttribute($attr);
 
     /* Save to mongodb */
     $dm->persist($prod);
 
     /* Create cms page */
     $page = new Page('/product/' . $prod->getUrl());
-    $page->setTitle($product['pagetitle']);
-    $page->setDescription($product['pagedesc']);
+    $page->setTitle($product['title']);
+    $page->setDescription($product['description']);
     $page->setView('webshop\\views\\ProductView');
     $page->setTemplate(ProductView::TEMPLATE);
     $page->setEntryPoint(ProductView::ENTRY);
@@ -174,76 +168,73 @@ foreach($products as $product)
     /* Save page to mongodb */
     $dm->persist($page);
 
-    putline($product['title'] . ", ");
     $i++;
+
+    if ($i % 100 == 0) {
+        echo "$i\n";
+        $dm->flush();
+        $dm->clear();
+    }
 }
+
+$dm->flush();
+
 putline("\n");
 putline("Done. $i products created\n");
 
+$i = 0;
 putline("Adding products to categories... ");
 foreach($products as $product) 
 {
-    if ($product['category'] == 0)
-        continue;
-
     $prod = $map_products[$product['id']];
     $category = $map_categories[$product['category']];
-    if ($category != null)
-        $category->addProduct($prod);
+    if ($category == null)
+        continue;
+
+    $category->addProduct($prod);
+
+    $i++;
+    if ($i % 200 == 0) {
+        echo "$i\n";
+        $dm->flush();
+        $dm->clear();
+    }
 }
 putline("OK.\n");
 
-putline("Uploading product images...\n");
-/* Sort images */
-$i = 0;
-foreach($products as $product) 
-{
-    /* Skip out-of-category products */
-    if ($product['category'] == 0)
-        continue;
+$dm->flush();
+$dm->clear();
 
-    $prod = $map_products[$product['id']];
-    $images = getProductImages($product['id']);
+if ($upload_images) {
+    putline("Uploading product images...\n");
+    /* Sort images */
+    $i = 0;
+    foreach($products as $product) 
+    {
+        if (!isset($product['image']) || strlen($product['image']) <= 0)
+            continue;
 
-    /* Category path */
-    $cat_path = "/";
-    $cat = $map_categories[$product['category']];
-    while($cat != null) {
-        $cat_path = "/" . $cat->getName() . $cat_path;;
-        if (isset($cat->parent_ref))
-            $cat = $cat->parent_ref;
-        else
-            $cat = null;
-    }
+        $prod = $map_products[$product['id']];
 
-    /* Product Name */
-    $img_path = __DIR__ . '/images/' . $dbname . $cat_path . $prod->getTitle() . '/';
-    if (!file_exists($img_path))
-        mkdir($img_path, 0777, true); 
-
-    /* Copy images */
-    foreach($images as $image) {
-        $name = pathinfo($image)['basename'];
-
-        $old_path = __DIR__ . '/images/' . $image;
-
-        if (file_exists($old_path)) 
-        {
-            $new_path = $img_path . $name;
-
-            $img = uploadImage($old_path);
-            $prod->addImage($img);
-
-            putline("$name --> " . $img->getUUID() . "\n");
-            $i++;
+        $image = $product['image'];
+        if (!file_exists($image)) {
+            echo "could not find $image (product: {$product['title']}\n";
+            continue;
         }
-    }
-}
 
-putline("Uploaded $i product images\n");
+        $img = uploadImage($image);
+        $prod->addImage($img);
+
+        putline("$image --> " . $img->getUUID() . "\n");
+        $i++;
+    }
+
+    putline("Uploaded $i product images\n");
+}
 
 /* Flushing changes to mongodb */
 $dm->flush();
+$dm->clear();
 
 putline("\n");
 putline("All done.\n");
@@ -261,72 +252,6 @@ function uploadImage($path)
 
     $image = new ProductImage($file->getFileId());
     return $image;
-}
-
-function getProductAttributes($product_id)
-{
-    global $product_attr;
-
-    $attr_ids = array();
-    foreach($product_attr as $pa) {
-        if ($pa['product'] == $product_id)
-            $attr_ids[] = $pa['attribute'];
-    }
-
-    $attributes = array();
-    foreach($attr_ids as $attr_id)
-        $attributes[] = getAttribute($attr_id);
-    return $attributes;
-}
-
-function findAttribute($id) 
-{
-    global $attribute_names;
-    foreach($attribute_names as $attr) {
-        if ($attr['id'] == $id)
-            return $attr;
-    }
-    return null;
-}
-
-function getAttribute($id) 
-{
-    $attr = findAttribute($id);
-    if ($attr === null)
-        throw new Exception("No such attribtue: $id");
-
-    $attribute = new Attribute();
-    $attribute->setName($attr['name']);
-
-    $values = getAttributeValues($id);
-    foreach($values as $value) {
-        $attribute->addValue($value);
-    }
-
-    return $attribute;
-}
-
-function getAttributeValues($attr_id)
-{
-    global $attributes;
-
-    $vals = array();
-    foreach($attributes as $attr_val) 
-    {
-        if ($attr_val['type'] != $attr_id) 
-            continue;
-
-        /* Skip empty options */
-        if (empty(trim($attr_val['value'])))
-            continue;
-
-        $obj = new AttributeValue();
-        $obj->setValue($attr_val['value']);
-        $obj->setPrice(new Money(100 * intval($attr_val['price'])));
-        $vals[] = $obj;
-    }
-
-    return $vals;
 }
 
 function getProductImages($id)
