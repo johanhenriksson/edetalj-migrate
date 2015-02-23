@@ -113,6 +113,7 @@ foreach($categories as $category)
 putline("OK\n");
 
 $dm->flush();
+$dm->clear();
 
 /* Setup category hieararchy */
 
@@ -132,6 +133,7 @@ foreach($categories as $old_cat)
 putline("OK.\n");
 
 $dm->flush();
+$dm->clear();
 
 /* Create products */
 $map_products = array();
@@ -171,6 +173,7 @@ foreach($products as $product)
     if ($i % 100 == 0) {
         echo "$i\n";
         $dm->flush();
+        $dm->clear();
     }
 }
 
@@ -194,11 +197,13 @@ foreach($products as $product)
     if ($i % 200 == 0) {
         echo "$i\n";
         $dm->flush();
+        $dm->clear();
     }
 }
 putline("OK.\n");
 
 $dm->flush();
+$dm->clear();
 
 if ($upload_images) {
     putline("Uploading product images...\n");
@@ -229,6 +234,7 @@ if ($upload_images) {
 
 /* Flushing changes to mongodb */
 $dm->flush();
+$dm->clear();
 
 putline("\n");
 putline("All done.\n");

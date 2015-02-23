@@ -93,12 +93,15 @@ foreach($products as $product)
 
     echo "$i ($j) " . $product->getTitle() . ": $image\n";
 
+
     $img = uploadImage($image);
+    $product->clearImages();
     $product->addImage($img);
 
     $i++;
-    if ($i % 25) {
+    if ($i % 50) {
         $dm->flush();
+        $dm->clear();
     }
 }
 
@@ -119,14 +122,19 @@ function uploadImage($path)
     global $uc_api;
     global $img_cache;
 
-    if (!isset($img_cache[$path])) {
+    $cached = isset($img_cache[$path]);
+
+    if (!$cached) {
         $file = $uc_api->uploader->fromPath($path);
         $file->store();
         $id = $file->getFileId();
 
-        $img_cache[$path] = $id;
+        echo "uploaded $path --> $id\n";
+        $image = new ProductImage($id);
+        $img_cache[$path] = $image;
+        return $image;
     }
 
-    $image = new ProductImage($img_cache[$path]);
-    return $image;
+    echo "image cache hit\n"; 
+    return $img_cache[$path];
 }
