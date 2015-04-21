@@ -19,40 +19,43 @@ $header = print_r(fgetcsv($file, 0, ';', "'"));
  * 6    Price
  */
 
-function parseCategory($cat1, $cat2, $cat3) {
+function parseCategory($cat1, $cat2, $cat3) 
+{
     global $categories;
     if (strlen($cat3) > 0) {
         $category = array(
-            "id" => "$cat1 / $cat2 / $cat3",
+            "path" => "$cat1 / $cat2 / $cat3",
             "name" => $cat3,
             "parent" => "$cat1 / $cat2",
         );
         if (!isset($categories[$category['parent']]))
             parseCategory($cat1, $cat2, "");
-        if (!isset($categories[$category['id']]))
-            $categories[$category['id']] = $category;
+        if (!isset($categories[$category['path']]))
+            $categories[$category['path']] = $category;
         return $category;
     }
     if (strlen($cat2) > 0) {
         $category = array(
-            "id" => "$cat1 / $cat2",
+            "path" => "$cat1 / $cat2",
             "name" => $cat2,
             "parent" => $cat1
         );
         if (!isset($categories[$category['parent']]))
             parseCategory($cat1, "", "");
-        if (!isset($categories[$category['id']]))
-            $categories[$category['id']] = $category;
+        if (!isset($categories[$category['path']]))
+            $categories[$category['path']] = $category;
         return $category;
     }
 
     $category = array(
-        "id" => $cat1,
+        "path" => $cat1,
         "name" => $cat1,
         "parent" => null
     );
-    if (!isset($categories[$category['id']]))
-        $categories[$category['id']] = $category;
+
+    if (!isset($categories[$category['path']]))
+        $categories[$category['path']] = $category;
+
     return $category;
 }
 
@@ -73,13 +76,16 @@ while(!feof($file))
     $category = parseCategory($cat1, $cat2, $cat3);
 
     $out = array(
-        'id' => trim($row[0]), // use reference as id
+        'path' => $category['path'] . ' / ' . trim($row[0]) . ': ' . trim($row[1]), // use reference as id
         'reference' => trim($row[0]),
         'title' => trim($row[1]),
         'description' => trim($row[2]),
         'price' => $price,
-        'category' => $category['id'], // category path as category id
+        'category' => $category['path'], // category path as category id
     );
+
+    if (strlen($out['title']) == 0)
+        continue;
 
     $img = sprintf("%s/img/%s.jpg", __DIR__, $row[0]);
     if (file_exists($img)) {

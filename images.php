@@ -116,7 +116,6 @@ putline("All done.\n");
     Functions
  ******************************************************/
 
-
 function uploadImage($path) 
 {
     global $uc_api;
